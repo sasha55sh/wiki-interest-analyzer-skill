@@ -12,6 +12,7 @@ dependencies = [
     "numpy>=2.5.3",
     "pandas>=3.0.6",
     "pymannkendall>=1.4.3",
+    "reportlab>=5.0.1",
     "scipy>=1.18.1",
 ]
 
@@ -28,6 +29,7 @@ module-root = "scripts"
 
 [dependency-groups]
 dev = [
+    "pypdf>=6.19.0",
     "pytest>=9.1.1",
     "ruff>=0.16.8",
 ]
