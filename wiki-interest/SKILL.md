@@ -20,29 +20,65 @@ All commands run from the skill directory. `uv` installs dependencies on first r
 uv run wiki-interest --help
 ```
 
-## Workflow
+## Quick Start
 
-1. **Resolve articles** — find the article for the topic in each requested language:
+**Full analysis in one command:**
 
-   ```bash
-   uv run wiki-interest resolve "<topic>" --langs uk,pl,cs
-   ```
+```bash
+cd wiki-interest
+uv run wiki-interest run "Astronomy" --langs uk,pl,cs --months 24
+```
 
-2. **Fetch pageviews** — download daily pageviews for the resolved articles.
-3. **Analyze** — detect trends, peaks and differences between languages.
-   See [references/methodology.md](references/methodology.md) for the statistical methods.
-4. **Plot** — build charts of the time series.
-5. **Report** — summarize the findings for the user.
-   See [references/interpretation.md](references/interpretation.md) for how to read the results
-   and which caveats to mention.
+This resolves the topic, fetches pageviews, analyzes trends, and produces a JSON summary + PNG chart.
 
-## Scripts
+**Output:** A `run-<timestamp>/` directory with `analysis.json` and `chart.png`.
 
-| Module | Purpose |
-| --- | --- |
-| `scripts/wiki_interest/cli.py` | Command-line entry point |
-| `scripts/wiki_interest/resolve.py` | Topic → article title per language |
-| `scripts/wiki_interest/fetch.py` | Wikimedia pageviews API client |
-| `scripts/wiki_interest/analyze.py` | Trend and peak analysis |
-| `scripts/wiki_interest/plot.py` | Charts |
-| `scripts/wiki_interest/report.py` | Report generation |
+## Decision Tree
+
+| User's intent | Command(s) |
+|---|---|
+| Compare topic interest across languages | `run "<topic>" --langs uk,pl,cs` |
+| Check if a specific language has the article | `resolve "<topic>" --langs uk` |
+| Use a Wikidata QID directly (skip search) | `run "" --langs uk,pl --qids Q333` |
+| Change the analysis period | `run "..." --months 6` or `--months 36` |
+
+## Key Rules for Responses
+
+1. **Cite the confidence level**: Always mention whether the result is `high`, `medium`, or `low` confidence.
+2. **Explain caveats**: Include warnings like "short_history", "low_volume", "high_seasonality" from the analysis.
+3. **Compare with normalization**: If the topic trend differs sharply from the whole-Wikipedia trend, mention this.
+4. **Don't overstate**: Interest in Wikipedia ≠ readiness to pay for a product. Frame as "a signal to investigate further."
+5. **Show numbers from JSON**: Extract YoY change, trend slope, confidence, and caveats directly from `analysis.json`.
+
+## Examples
+
+### Example 1: Single language, recent trend
+```
+User: "Is astronomy growing in interest in Ukrainian Wikipedia?"
+→ run "Astronomy" --langs uk --months 24
+→ Check JSON for: confidence, yoy_change_pct, caveats
+→ Reply: "Based on the last 24 months, interest in astronomy [increased/decreased] by X%. 
+   Confidence is [high/medium/low] because [reason from caveats]."
+```
+
+### Example 2: Comparison and ambiguity
+```
+User: "Compare interest in Mercury across Wikipedia versions"
+→ resolve "Mercury" --langs uk,en,de
+→ Error: ambiguous_topic (planet vs. element vs. Roman god)
+→ Show candidates, ask user to clarify
+→ run "" --langs uk,en,de --qids Q308  (planet)
+```
+
+### Example 3: Language not covered
+```
+User: "Check intermittent fasting interest in Polish"
+→ run "Intermittent fasting" --langs pl,cs
+→ Result: "pl" in langs_missing (no Wikipedia article in Polish)
+→ Reply: "No Wikipedia article exists in Polish. Czech shows [data]."
+```
+
+## References
+
+- **Methodology**: See `references/methodology.md` for trend tests (Mann-Kendall), confidence scoring rules, anomaly detection.
+- **Interpretation**: See `references/interpretation.md` for how to phrase conclusions and which caveats to mention.
