@@ -1,8 +1,7 @@
 [project]
 name = "wiki-interest"
 version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
+description = "Analyze Wikipedia pageview trends across languages."
 authors = [
     { name = "sasha55sh", email = "150395476+sasha55sh@users.noreply.github.com" }
 ]
@@ -23,6 +22,9 @@ wiki-interest = "wiki_interest.cli:main"
 [build-system]
 requires = ["uv_build>=0.11.15,<0.12.0"]
 build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = "scripts"
 
 [dependency-groups]
 dev = [
