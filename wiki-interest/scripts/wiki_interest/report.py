@@ -4,18 +4,18 @@ from datetime import date
 from pathlib import Path
 
 try:
+    from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import inch
     from reportlab.platypus import (
+        Image,
+        Paragraph,
         SimpleDocTemplate,
+        Spacer,
         Table,
         TableStyle,
-        Paragraph,
-        Spacer,
-        Image,
     )
-    from reportlab.lib import colors
 except ImportError:
     raise ImportError("reportlab required: pip install reportlab")
 

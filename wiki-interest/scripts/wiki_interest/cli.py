@@ -45,14 +45,14 @@ def cmd_run(args):
     run_dir = home() / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    end = date.today().replace(day=1) - timedelta(days=1)  # Last full month
+    end = date.today().replace(day=1) - timedelta(days=1)  
     start = end.replace(day=1) - timedelta(days=30 * (args.months - 1))
 
     targets = []
     for lang in args.langs:
         for article in resolution.articles[lang]:
             targets.append((article.project, article.title))
-            for redirect in article.redirects[:5]:  # Limit redirects
+            for redirect in article.redirects[:5]: 
                 targets.append((article.project, redirect))
 
     views_data = daily_views(client, cache, targets, start, end, workers=4)
@@ -109,6 +109,31 @@ def cmd_resolve(args):
         return {"error": e.code, "hint": e.hint, "candidates": e.candidates}
 
 
+def cmd_report(args):
+    """Generate report from a previous run."""
+    run_dir = home() / "runs" / args.run
+    if not run_dir.exists():
+        return {"error": "run_not_found", "hint": f"Run {args.run} not found"}
+
+    analysis_file = run_dir / "analysis.json"
+    if not analysis_file.exists():
+        return {"error": "missing_analysis", "hint": "analysis.json not found in run"}
+
+    analysis = json.loads(analysis_file.read_text(encoding="utf-8"))
+    return {
+        "run_id": args.run,
+        "analysis": analysis,
+        "summary": {
+            lang: {
+                "confidence": data["confidence"],
+                "yoy_change_pct": data["yoy_change_pct"],
+                "caveats": data["caveats"],
+            }
+            for lang, data in analysis.items()
+        },
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="wiki-interest", description="Analyze Wikipedia pageview trends across languages."
@@ -128,6 +153,10 @@ def main(argv: list[str] | None = None) -> int:
     p_resolve.add_argument("--qids", help="Skip search, use these QIDs directly")
     p_resolve.set_defaults(func=cmd_resolve)
 
+    p_report = sub.add_parser("report", help="Generate report from a previous run")
+    p_report.add_argument("--run", required=True, help="Run ID (e.g., run-1234567890)")
+    p_report.set_defaults(func=cmd_report)
+
     args = parser.parse_args(argv)
 
     if hasattr(args, "langs") and args.langs:
@@ -141,7 +170,7 @@ def main(argv: list[str] | None = None) -> int:
         result = args.func(args)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
-    except Exception as e:
+    except Exception as e: 
         print(
             json.dumps({"error": "internal_error", "message": str(e)}, ensure_ascii=False),
             file=sys.stderr,
@@ -151,28 +180,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
-
-def cmd_report(args):
-    """Generate report from a previous run."""
-    run_dir = home() / "runs" / args.run_id
-    if not run_dir.exists():
-        return {"error": "run_not_found", "hint": f"Run {args.run_id} not found"}
-    
-    analysis_file = run_dir / "analysis.json"
-    if not analysis_file.exists():
-        return {"error": "missing_analysis", "hint": "analysis.json not found in run"}
-    
-    analysis = json.loads(analysis_file.read_text(encoding="utf-8"))
-    return {
-        "run_id": args.run_id,
-        "analysis": analysis,
-        "summary": {
-            lang: {
-                "confidence": data["confidence"],
-                "yoy_change_pct": data["yoy_change_pct"],
-                "caveats": data["caveats"],
-            }
-            for lang, data in analysis.items()
-        },
-    }
