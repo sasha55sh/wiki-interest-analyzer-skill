@@ -99,7 +99,7 @@ def pick(candidates: list[dict], topic: str) -> dict:
     if not candidates:
         raise TopicError(
             "unknown_topic", f"No Wikipedia article found for '{topic}'.",
-            "Try an English name of the topic, a more specific phrase, or pass --qid.",
+            "Try an English name of the topic, a more specific phrase, or pass --qids.",
         )
     top = candidates[0]
     rivals = [c for c in candidates[1:4] if c["wikipedias"] >= AMBIGUITY_RATIO * top["wikipedias"]]
@@ -107,7 +107,7 @@ def pick(candidates: list[dict], topic: str) -> dict:
         options = [top, *rivals]
         raise TopicError(
             "ambiguous_topic", f"'{topic}' can mean several things.",
-            "Pick the intended meaning (ask the user if unclear) and re-run with --qid <QID>.",
+            "Pick the intended meaning (ask the user if unclear) and re-run with --qids <QID>.",
             [{"qid": c["qid"], "label": c["label"], "description": c.get("description", "")} for c in options],
         )
     return top

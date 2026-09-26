@@ -4,14 +4,14 @@
 
 ```bash
 export OPENROUTER_API_KEY=sk-or-...  # Get from https://openrouter.ai/keys
-cd wiki-interest
-uv sync
+cd .claude/skills/wiki-interest
+uv sync --locked
 ```
 
 ## Run Local Tests (No API Key Needed)
 
 ```bash
-# Unit tests: 17 tests, all offline, ~5 seconds
+# Unit tests: all offline, ~5 seconds
 uv run pytest tests/ -v
 
 # Local eval: 2 core scenarios

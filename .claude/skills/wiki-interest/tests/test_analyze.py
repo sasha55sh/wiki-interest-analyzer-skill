@@ -1,9 +1,11 @@
 """Test analyze: metrics, confidence, caveats."""
 
+import json
 from datetime import date
 
 from wiki_interest.analyze import (
     analyze,
+    baseline,
     detect_anomalies,
     monthly_from_daily,
 )
@@ -64,10 +66,43 @@ def test_analyze_returns_json_compatible():
     daily = {date(2025, 1, i): 100 + i for i in range(1, 32)}
     daily.update({date(2025, 2, i): 120 + i for i in range(1, 29)})
     result = analyze(daily)
-    assert isinstance(result["yoy_change_pct"], float)
+    json.dumps(result)
+    assert result["yoy_change_pct"] is None  # < 24 months: YoY is not computable
     assert isinstance(result["confidence"], str)
     assert isinstance(result["caveats"], list)
     assert result["confidence"] in ["low", "medium", "high"]
+    assert result["monthly"] == {"2025-01": sum(range(101, 132)), "2025-02": sum(range(121, 149))}
+
+
+def test_confidence_high_is_reachable():
+    """Big, long, steadily growing series gets all three points -> high."""
+    daily = {}
+    for m in range(36):
+        y, mo = 2022 + m // 12, m % 12 + 1
+        for d in range(1, 29):
+            daily[date(y, mo, d)] = int(5000 * 1.02**m)
+    result = analyze(daily)
+    assert result["confidence"] == "high"
+    assert result["ci95"][0] > 0
+    assert 20 < result["trend_pct_per_year"] < 30  # 1.02**12 - 1 = 26.8%
+
+
+def test_flat_noisy_series_is_not_significant():
+    """No trend -> CI straddles zero, confidence at most medium."""
+    daily = {}
+    for m in range(24):
+        y, mo = 2023 + m // 12, m % 12 + 1
+        for d in range(1, 29):
+            daily[date(y, mo, d)] = 3000 + (400 if m % 2 else -400)
+    result = analyze(daily)
+    assert result["ci95"][0] < 0 < result["ci95"][1]
+    assert result["confidence"] == "medium"
+
+
+def test_baseline():
+    daily = {date(2025, 1, d): 100 for d in range(1, 29)}
+    assert baseline(daily)["yoy_change_pct"] is None
+    assert baseline({}) == {"yoy_change_pct": None, "trend_pct_per_year": None}
 
 
 def test_analyze_bot_traffic_caveat():
