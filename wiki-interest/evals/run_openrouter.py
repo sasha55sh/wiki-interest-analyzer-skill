@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 """Run eval cases on OpenRouter (Qwen, Llama, etc.) or Claude API."""
 
-import json
 import os
 import sys
-from pathlib import Path
+
+import httpx
 
 EVALS = [
     {
@@ -30,12 +30,6 @@ EVALS = [
 
 def run_eval_openrouter(model: str = "qwen/qwen-2.5-7b-instruct-free"):
     """Run evals using OpenRouter API."""
-    try:
-        import httpx
-    except ImportError:
-        print("httpx required: pip install httpx")
-        return 1
-
     api_key = os.getenv("OPENROUTER_API_KEY")
     if not api_key:
         print("OPENROUTER_API_KEY env var not set")
@@ -74,7 +68,7 @@ Then explain what you found."""
 
             found_all = all(expect in answer for expect in eval_case["expect_in_response"])
             if found_all:
-                print(f"  [PASS] All expected terms found")
+                print("  [PASS] All expected terms found")
                 passed += 1
             else:
                 missing = [e for e in eval_case["expect_in_response"] if e not in answer]
@@ -92,7 +86,7 @@ def run_eval_local():
     print("=== Local Evals (Offline) ===\n")
     from wiki_interest.cache import Cache
     from wiki_interest.fetch import Client
-    from wiki_interest.resolve import resolve, TopicError
+    from wiki_interest.resolve import TopicError, resolve
 
     passed = 0
 

@@ -1,16 +1,11 @@
 #!/usr/bin/env python
 """Run eval cases locally with mocked API (offline)."""
 
-import json
 import sys
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
 from wiki_interest.cache import Cache
 from wiki_interest.fetch import Client
-from wiki_interest.resolve import resolve, TopicError
+from wiki_interest.resolve import TopicError, resolve
 
 
 def test_resolve_ambiguous():

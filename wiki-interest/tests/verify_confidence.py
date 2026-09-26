@@ -1,5 +1,6 @@
 from datetime import date
-from scripts.wiki_interest.analyze import analyze
+
+from wiki_interest.analyze import analyze
 
 print("\n" + "=" * 70)
 print("CONFIDENCE SCORING VERIFICATION")
@@ -14,7 +15,7 @@ for m in range(1, 25):
 
 result1 = analyze(daily1)
 print(f"  Total views: {sum(daily1.values())} (median ~112/month)")
-print(f"  Months: {len(set((d.year, d.month) for d in daily1.keys()))}")
+print(f"  Months: {len({(d.year, d.month) for d in daily1})}")
 print(f"  Confidence: {result1['confidence']}")
 print(f"  Caveats: {result1['caveats']}")
 print(f"  Result: {result1['yoy_change_pct']}% YoY")
@@ -60,7 +61,7 @@ for m in range(1, 25):
 result3 = analyze(daily3)
 med = sum(daily3.values()) / 24 / 28
 print(f"  Total views: {sum(daily3.values())} (median ~{med:.0f}/day)")
-print(f"  Months: 24, Growth: +15% YoY")
+print("  Months: 24, Growth: +15% YoY")
 print(f"  Confidence: {result3['confidence']}")
 print(f"  Caveats: {result3['caveats']}")
 print(f"  Result: {result3['yoy_change_pct']}% YoY")
@@ -72,6 +73,6 @@ print("=" * 70)
 print("  +1 point: median views >= 1000 (monthly)")
 print("  +1 point: >= 24 months of data")
 print("  +1 point: trend significant (p < 0.05) with non-zero CI95")
-print("")
+print()
 print("  Scoring: <2 = low, 2-3 = medium, >=4 = high")
 print("=" * 70)

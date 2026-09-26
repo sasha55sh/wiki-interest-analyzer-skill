@@ -7,6 +7,8 @@ certifi==2026.7.22
     # via
     #   httpcore
     #   httpx
+charset-normalizer==3.5.1
+    # via reportlab
 contourpy==1.4.0
     # via matplotlib
 cycler==0.12.1
@@ -40,7 +42,9 @@ packaging==26.3
 pandas==3.0.6
     # via wiki-interest
 pillow==12.3.0
-    # via matplotlib
+    # via
+    #   matplotlib
+    #   reportlab
 pymannkendall==1.4.3
     # via wiki-interest
 pyparsing==3.3.3
@@ -49,6 +53,8 @@ python-dateutil==2.9.0.post0
     # via
     #   matplotlib
     #   pandas
+reportlab==5.0.1
+    # via wiki-interest
 scipy==1.18.1
     # via
     #   pymannkendall
