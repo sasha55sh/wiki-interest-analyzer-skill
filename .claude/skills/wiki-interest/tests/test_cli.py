@@ -56,50 +56,70 @@ def test_report_pdf_cyrillic_and_long_text_flows(tmp_path):
     assert data.count(b"/Type /Page\n") + data.count(b"/Type /Page ") >= 2  # long text -> more pages
 
 
-def test_report_command_reads_run(tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("WIKI_INTEREST_HOME", str(tmp_path))
-    run_dir = tmp_path / "runs" / "run-1"
+def _make_session(home, n_steps: int):
+    """Session folder as `run` writes it: session.json + analysis-N.json per step."""
+    run_dir = home / "runs" / "session-1"
     run_dir.mkdir(parents=True)
-    (run_dir / "analysis.json").write_text(json.dumps(_sample_results()), encoding="utf-8")
-    (run_dir / "meta.json").write_text(
-        json.dumps({"topic": "Test", "period": ["2025-01-01", "2025-12-31"], "langs_missing": ["cs"]}),
-        encoding="utf-8",
-    )
+    steps = []
+    for n in range(1, n_steps + 1):
+        (run_dir / f"analysis-{n}.json").write_text(json.dumps(_sample_results()), encoding="utf-8")
+        steps.append({
+            "step": n, "question": None if n == 1 else f"Уточнення {n}", "topic": "Test",
+            "qids": ["Q1"], "langs": ["uk", "pl", "cs"], "months": 12,
+            "period": ["2025-01-01", "2025-12-31"], "langs_missing": ["cs"],
+        })
+    (run_dir / "session.json").write_text(json.dumps({"steps": steps}), encoding="utf-8")
+    return run_dir
+
+
+def test_report_command_reads_session(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("WIKI_INTEREST_HOME", str(tmp_path))
+    run_dir = _make_session(tmp_path, 1)
 
     code = cli.main([
-        "report", "--run", "run-1", "--lang", "uk", "--title", "Тест",
+        "report", "--session", "session-1", "--lang", "uk", "--title", "Тест",
         "--conclusion", "ok", "--recommendation", "a", "--recommendation", "b",
     ])
     assert code == 0
     out = json.loads(capsys.readouterr().out)
     assert (run_dir / "report.pdf").exists()
-    assert (run_dir / "chart_uk.png").exists()
+    assert (run_dir / "chart-1.png").exists()
     assert set(out["summary"]) == {"uk", "pl"}
 
 
-def test_report_compares_topics_from_several_runs(tmp_path, monkeypatch, capsys):
+def test_report_includes_followups_in_one_pdf(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("WIKI_INTEREST_HOME", str(tmp_path))
-    one_lang = {"en": _sample_results()["uk"]}
-    for run_id, topic in (("run-a", "JavaScript"), ("run-b", "TypeScript")):
-        run_dir = tmp_path / "runs" / run_id
-        run_dir.mkdir(parents=True)
-        (run_dir / "analysis.json").write_text(json.dumps(one_lang), encoding="utf-8")
-        (run_dir / "meta.json").write_text(
-            json.dumps({"topic": topic, "period": ["2025-01-01", "2025-12-31"]}), encoding="utf-8"
-        )
+    run_dir = _make_session(tmp_path, 3)
 
-    assert cli.main(["report", "--run", "run-a", "--run", "run-b", "--lang", "uk"]) == 0
+    code = cli.main([
+        "report", "--session", "session-1", "--lang", "uk", "--conclusion", "головна відповідь",
+        "--followup", "Чому надійність низька?", "Мало переглядів.",
+        "--followup", "2", "Коротка відповідь на крок 2.",
+    ])  # step 3 is not mentioned but still goes into the report
+    assert code == 0
     out = json.loads(capsys.readouterr().out)
-    assert set(out["summary"]) == {"JavaScript", "TypeScript"}
-    assert out["files"]["report"].endswith("report.pdf")
+    assert [p.rsplit("-", 1)[-1] for p in out["files"]["charts"]] == ["1.png", "2.png", "3.png"]
+    assert all((run_dir / f"chart-{n}.png").exists() for n in (1, 2, 3))
+    assert list(run_dir.glob("*.pdf")) == [run_dir / "report.pdf"]
 
 
-def test_missing_run_is_json_error(tmp_path, monkeypatch, capsys):
+def test_report_rejects_unknown_step(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("WIKI_INTEREST_HOME", str(tmp_path))
-    assert cli.main(["report", "--run", "nope"]) == 1
-    assert json.loads(capsys.readouterr().out)["error"] == "run_not_found"
+    _make_session(tmp_path, 1)
+    assert cli.main(["report", "--session", "session-1", "--followup", "2", "x"]) == 1
+    assert json.loads(capsys.readouterr().out)["error"] == "unknown_step"
+
+
+def test_missing_session_is_json_error(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("WIKI_INTEREST_HOME", str(tmp_path))
+    assert cli.main(["report", "--session", "nope"]) == 1
+    assert json.loads(capsys.readouterr().out)["error"] == "session_not_found"
+    assert cli.main(["run", "--session", "nope"]) == 1
+    assert json.loads(capsys.readouterr().out)["error"] == "session_not_found"
 
 
 def test_topic_or_qids_required():
     with pytest.raises(SystemExit):
         cli.main(["run", "--langs", "uk"])
+    with pytest.raises(SystemExit):
+        cli.main(["run", "Astronomy"])  # --langs needed for a new session

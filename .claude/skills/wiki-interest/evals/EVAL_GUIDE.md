@@ -59,7 +59,7 @@ The script tests 3 core scenarios:
 
 1. **astronomy_uk_basic**: Single-language trend analysis
    - Command: `run "Astronomy" --langs uk --months 24`
-   - Expect: run_id, confidence, "uk"
+   - Expect: session_id, confidence, "uk"
 
 2. **intermittent_fasting_missing_lang**: Missing language handling
    - Command: `run "Intermittent fasting" --langs pl,cs --months 24`

@@ -3,7 +3,7 @@ cases:
     query: "Compare astronomy interest in UK and Polish Wikipedia over 24 months"
     command: "run \"Astronomy\" --langs uk,pl --months 24"
     expect:
-      - "run_id" in response
+      - "session_id" in response
       - response["langs_found"] includes "uk"
       - response["langs_found"] includes "pl"
       - all values in response["results"] have "confidence" key
@@ -13,7 +13,7 @@ cases:
     query: "Is intermittent fasting interest growing in Polish and Czech Wikipedia?"
     command: "run \"Intermittent fasting\" --langs pl,cs --months 24"
     expect:
-      - "run_id" in response
+      - "session_id" in response
       - "pl" in response["langs_missing"]  # No pl article for this topic
       - "cs" in response["langs_found"]
       - response["results"]["cs"]["confidence"] in ["high", "medium", "low"]
@@ -37,13 +37,13 @@ cases:
     query: "Analyze Q333 (Astronomy) directly"
     command: "run \"\" --langs uk,pl --qids Q333 --months 24"
     expect:
-      - "run_id" in response
+      - "session_id" in response
       - len(response["langs_found"]) == 2
 
   - name: short_period
     query: "Analyze with only 6 months of data"
     command: "run \"Astronomy\" --langs uk --months 6"
     expect:
-      - "run_id" in response
+      - "session_id" in response
       - response["results"]["uk"]["confidence"] == "low"
       - "short_history" in response["results"]["uk"]["caveats"]

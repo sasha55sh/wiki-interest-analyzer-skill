@@ -11,7 +11,7 @@ EVALS = [
         "name": "astronomy_uk_basic",
         "prompt": "Analyze Wikipedia pageview trend: How has interest in astronomy changed in Ukrainian Wikipedia over the last 24 months?",
         "skill_command": 'wiki-interest run "Astronomy" --langs uk --months 24',
-        "expect_in_response": ["run_id", "confidence", "uk"],
+        "expect_in_response": ["session_id", "confidence", "uk"],
     },
     {
         "name": "intermittent_fasting_missing_lang",

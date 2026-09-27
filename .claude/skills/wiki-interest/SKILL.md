@@ -38,34 +38,51 @@ prints one JSON object to stdout; a non-zero exit code means the JSON has an
    - Success → note the Wikidata QID from `qids` (internal only, never show it).
 
 2. **Run the analysis** by QID (skips the search, so no second ambiguity). Pass
-   `--lang` = the user's language (`uk` or `en`) so the chart labels match:
+   `--lang` = the user's language (`uk` or `en`) so the chart labels match, and
+   `--question` = the user's question in their words:
    ```bash
-   uv run --directory <skill-dir> wiki-interest run --qids Q3220036 --langs uk,pl,cs --months 24 --lang uk
+   uv run --directory <skill-dir> wiki-interest run --qids Q3220036 --langs uk,pl,cs --months 24 --lang uk \
+     --question "<the user's question>"
    ```
    If the topic is unambiguous you can skip step 1: `run "Astronomy" --langs uk,pl,cs`.
+   This starts a **session**. Keep `session_id` for the whole conversation (don't show it).
 
 3. **Answer the user in chat** from the `results` in the JSON (see rules below) and
-   offer the chart at `files.chart`. Keep the `run_id` for later (don't show it).
+   offer the chart at `files.chart`.
 
-4. **Handle follow-up questions.** The user will often ask to clarify (another
-   language, a longer period, why confidence is low, what a spike means). Answer from
-   the same run; re-run only if the question needs new data (new languages/period).
+4. **Handle follow-up questions in the same session.**
+   - Answerable from data you already have (why confidence is low, what a spike means):
+     just answer in chat, no command. Remember the question and your short answer.
+   - Needs new data (another language, period or topic): add a step to the session.
+     Omitted topic/`--langs`/`--months` are taken from the previous step:
+     ```bash
+     uv run --directory <skill-dir> wiki-interest run --session <session_id> --langs pl,en --lang uk \
+       --question "<the follow-up question>"
+     ```
+     The JSON has `step` (2, 3, …) and its own `files.chart`. Never start a new session
+     for a follow-up.
 
 5. **Ask before making a PDF.** When the discussion settles, ask the user whether to
    generate a PDF report (e.g. "Згенерувати PDF-звіт?"). **Never generate it without a
-   yes.** If they agree, run it on the latest relevant run:
+   yes.** If they agree, make **one** PDF for the whole session:
    ```bash
-   uv run --directory <skill-dir> wiki-interest report --run <run_id> --lang uk \
-     --title "<the user's request, in their words>" \
-     --conclusion "<2-4 sentences: the answer to their question, incl. follow-up findings>" \
-     --recommendation "<action 1>" --recommendation "<action 2>"
+   uv run --directory <skill-dir> wiki-interest report --session <session_id> --lang uk \
+     --title "<the user's main request, in their words>" \
+     --conclusion "<2-4 sentences: the answer to the main question>" \
+     --recommendation "<action 1>" --recommendation "<action 2>" \
+     --followup "<follow-up answered in chat>" "<1-2 sentence answer>" \
+     --followup 2 "<1-2 sentence answer to follow-up step 2>"
    ```
-   The PDF (`files.report`) contains: title = the user's request, a small results table
+   `--followup <step> "<answer>"` is for a follow-up that ran a new step (its question and
+   chart are taken from the session); `--followup "<question>" "<answer>"` is for one you
+   answered without new data. Pass them in the order they were asked.
+   The PDF (`files.report`) contains: title = the main request, a small results table
    per language, critical issues (missing languages, low volume, short history are
    added automatically; add others with `--problem "..."`), your conclusion, your
-   recommendations, and the chart. A short report fits one page; long text continues
-   on the next page. Write conclusion and recommendations in the user's language,
-   in plain words, without QIDs, run IDs or statistical jargon.
+   recommendations, the main chart, then each follow-up: question, short answer and its
+   chart if it has one. A short report fits one page; long text continues on the next
+   page. Write all text in the user's language, in plain words, without QIDs, session
+   IDs or statistical jargon.
 
 ## Commands
 
@@ -75,13 +92,13 @@ prints one JSON object to stdout; a non-zero exit code means the JSON has an
 | Check which languages have an article | `resolve "<topic>" --langs uk,pl,cs` |
 | Use a known Wikidata QID | `run --qids Q333 --langs uk,pl` |
 | Change the period | `--months 12` … `--months 60` (complete calendar months) |
-| Compare several topics (e.g. Python vs JavaScript) | one `run` **per topic** (passing several QIDs to one run would sum them), then compare the results |
-| PDF report (only after the user agrees) | `report --run <run_id> --lang uk --title "..." --conclusion "..." --recommendation "..."` |
-| PDF comparing topics | `report --run <id1> --run <id2> --run <id3> ...` (table rows and chart lines = topics) |
+| Follow-up needing new data | `run --session <session_id> --question "..." [--langs ...] [--months ...] [--qids ...]` |
+| Another topic in the same conversation (e.g. Python, then JavaScript) | `run --session <session_id> --qids <QID> --question "..."` — one step **per topic** (several QIDs in one run would be summed) |
+| PDF report (only after the user agrees) | `report --session <session_id> --lang uk --title "..." --conclusion "..." --recommendation "..." --followup ...` |
 
-Outputs go to `<skill-dir>/runs/<run_id>/`: `analysis.json`, `meta.json`, `chart.png`,
-and `report.pdf` + `chart_<lang>.png` after `report`. Downloads are cached in `<skill-dir>/.cache/`, so
-repeated runs are fast.
+Outputs go to `<skill-dir>/runs/<session_id>/`: `session.json` (the steps),
+`analysis-<step>.json` and `chart-<step>.png` for every step, and one `report.pdf`
+after `report`. Downloads are cached in `<skill-dir>/.cache/`, so repeated runs are fast.
 
 ## Result fields (per language)
 
@@ -104,7 +121,7 @@ repeated runs are fast.
 4. **Don't overstate**: pageviews ≠ demand or willingness to pay. Frame results as
    "a signal to investigate further".
 5. **Use numbers from the JSON only**; never invent or extrapolate.
-6. **Hide technical IDs**: no QIDs or run IDs in the user-facing answer.
+6. **Hide technical IDs**: no QIDs or session IDs in the user-facing answer.
 7. **Answer in the user's language.**
 
 ## Examples
@@ -114,6 +131,18 @@ User: "Чи зростає інтерес до астрономії в укра�
 → run "Astronomy" --langs uk --months 24
 → "За рік перегляди впали на 60% (вся українська Вікіпедія: −25%), тобто падіння
    сильніше за загальне. Впевненість середня: сильна сезонність (навчальний рік)."
+```
+
+```
+User: "Чи зростає інтерес до писанки перед Великоднем?"
+→ resolve "писанка" --langs uk → ambiguous → user picks "pysanka"
+→ run --qids Q3233785 --langs uk,de --months 48 --lang uk --question "Чи зростає інтерес до писанки перед Великоднем?"
+User: "Чому надійність для німецької низька?" → answer in chat (low_volume), no command
+User: "А як у Польщі та англомовній аудиторії?"
+→ run --session <session_id> --langs pl,en --lang uk --question "А як у Польщі та англомовній аудиторії?"   (step 2)
+User: "Так, зроби PDF"
+→ report --session <session_id> --lang uk --title "..." --conclusion "..." --recommendation "..." \
+    --followup "Чому надійність для німецької низька?" "Мало переглядів…" --followup 2 "Польської статті немає…"
 ```
 
 ```

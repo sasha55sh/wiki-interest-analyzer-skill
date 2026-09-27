@@ -1,9 +1,9 @@
-"""Short PDF report for the user.
+"""Short PDF report for the user, one per session.
 
-Layout: title (the user's question) → results table → critical issues (only if any)
-→ conclusion → recommendations → chart. A short report fits one A4 page; long text
-flows onto further pages.
-Numbers come from analysis.json; conclusion and recommendations are written by the agent.
+Layout: title (the user's main question) → results table → critical issues (only if any)
+→ conclusion → recommendations → chart → follow-ups (question, short answer, chart if the
+follow-up fetched new data). A short report fits one A4 page; long text flows onto further pages.
+Numbers come from analysis-N.json; conclusion, recommendations and answers are written by the agent.
 """
 
 import statistics
@@ -95,8 +95,8 @@ def _cap(s: str) -> str:
     return s[:1].upper() + s[1:]
 
 
-def _results_table(analysis: dict, lang: str, first_col: str = "col_lang") -> Table:
-    rows = [[t(k, lang) for k in (first_col, "col_direction", "col_yoy", "col_site", "col_views", "col_conf")]]
+def _results_table(analysis: dict, lang: str) -> Table:
+    rows = [[t(k, lang) for k in ("col_lang", "col_direction", "col_yoy", "col_site", "col_views", "col_conf")]]
     style = []
     for i, (code, d) in enumerate(analysis.items(), start=1):
         direction = _direction(d)
@@ -139,21 +139,21 @@ def generate_report(
     recommendations: list[str] | None = None,
     problems: list[str] | None = None,
     lang: str = "en",
-    rows: str = "languages",
+    followups: list[dict] | None = None,
 ) -> bytes | None:
-    """Build the one-page PDF.
+    """Build the PDF.
 
     Args:
-        topic: the user's question / topic, used in the title
-        analysis: {lang: analysis_result} from analysis.json
+        topic: the user's main question / topic, used in the title
+        analysis: {lang: analysis_result} of the main step
         chart_file: PNG from plot_trends (in the same `lang`)
-        conclusion: agent's conclusion in the user's language
+        conclusion: agent's answer to the main question, in the user's language
         output_file: PDF path, or None to return bytes
-        meta: run meta.json (period, langs_missing)
+        meta: the main step from session.json (period, langs_missing)
         recommendations: agent's recommendations, one per item
         problems: extra critical issues from the agent (added to the automatic ones)
         lang: language of the labels ("uk", "en")
-        rows: "languages" (one topic, rows = languages) or "topics" (rows = compared topics)
+        followups: [{"question", "answer", "chart_file" or None}] in conversation order
     """
     _register_fonts()
     meta = meta or {}
@@ -176,7 +176,7 @@ def generate_report(
     ]
 
     if analysis:
-        story += [Paragraph(t("results", lang), h2), _results_table(analysis, lang, "col_topic" if rows == "topics" else "col_lang")]
+        story += [Paragraph(t("results", lang), h2), _results_table(analysis, lang)]
 
     issues = auto_problems(analysis, meta.get("langs_missing") or [], lang) + list(problems or [])
     if issues:
@@ -206,6 +206,14 @@ def generate_report(
             Paragraph(t("chart", lang), h2),
             Image(chart_file, width=PAGE_W - 2 * MARGIN, height=7 * cm, kind="proportional"),
         ]))
+
+    for f in followups or []:
+        block = [Paragraph(escape(t("followup", lang, question=f["question"])), h2)]
+        if f.get("answer"):
+            block.append(Paragraph(escape(f["answer"]).replace("\n", "<br/>"), body))
+        if f.get("chart_file") and Path(f["chart_file"]).exists():
+            block.append(Image(f["chart_file"], width=PAGE_W - 2 * MARGIN, height=6 * cm, kind="proportional"))
+        story.append(KeepTogether(block))
 
     story += [Spacer(1, 0.2 * cm), Paragraph(t("footer", lang), small)]
 
