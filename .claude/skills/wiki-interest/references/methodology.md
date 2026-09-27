@@ -39,6 +39,7 @@ Daily views are summed into calendar months.
 | `mann_kendall_p` | ≥ 24 months: **seasonal** Mann-Kendall (period 12) compares each calendar month only with the same month in other years, so school-year or holiday cycles do not look like trends. 12–23 months: plain Mann-Kendall. < 12 months: not tested (`p = 1`). |
 | `anomalies` | Daily spikes: views > 3× the 31-day rolling median, or robust z-score (rolling MAD) > 5. Reported by month, up to 10. |
 | `baseline` | `yoy_change_pct` and `trend_pct_per_year` of the whole language edition. |
+| `seasonality` | Needs ≥ 24 months. The series is cut into complete 12-month **seasons counted back from the last month** (36 months ending in August → three Sep–Aug seasons; an incomplete leading remainder is dropped). Each season is compared with **its own mean**, so a long-term decline does not hide the yearly shape: `peak_vs_mean_pct = (peak / season mean − 1) × 100`, same for the low. `peak_repeats` = the peak falls in the same calendar month in every season. `peak_above_neighbours` = the peak month is higher than both adjacent months of the full series; if not, the "peak" is only the first month of a falling (or last of a rising) season, i.e. trend, not seasonality. `by_month` is the raw month × year table. |
 
 ## 4. Caveats
 

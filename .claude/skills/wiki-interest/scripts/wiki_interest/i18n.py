@@ -7,6 +7,13 @@ MONTHS = {
     "en": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
 }
 
+MONTHS_FULL = {
+    "uk": ["січень", "лютий", "березень", "квітень", "травень", "червень", "липень", "серпень",
+           "вересень", "жовтень", "листопад", "грудень"],
+    "en": ["January", "February", "March", "April", "May", "June", "July", "August", "September",
+           "October", "November", "December"],
+}
+
 LANG_NAMES = {
     "uk": {
         "uk": "українська", "en": "англійська", "pl": "польська", "cs": "чеська", "sk": "словацька",
@@ -48,6 +55,18 @@ TEXT = {
         "recommendations": "Рекомендації",
         "chart": "Динаміка переглядів",
         "followup": "Уточнення: {question}",
+        "seasonality": "Сезонність",
+        "col_year": "Рік",
+        "col_season": "Сезон",
+        "col_season_mean": "Середнє\nна місяць",
+        "col_peak": "Пік (проти середнього)",
+        "col_low": "Мінімум (проти середнього)",
+        "peak_repeats": "Найвищий місяць щороку — {month}.",
+        "peak_varies": "Найвищий місяць щороку різний: {months}.",
+        "low_repeats": "Найнижчий місяць щороку — {month}.",
+        "low_varies": "Найнижчий місяць щороку різний: {months}.",
+        "peak_is_trend": "Пік сезону {season} не вищий за сусідні місяці, тож це радше наслідок загального тренду, ніж сезонність.",
+        "season_note": "Кожен сезон (12 місяців) порівнюється з його власним середнім. Зелений — пік сезону, червоний — мінімум.",
         "views_per_month": "переглядів на місяць",
         "no_data": "Немає даних",
         "missing_lang": "Мовою «{name}» статті немає, тому даних немає (це не означає нульовий інтерес).",
@@ -80,6 +99,18 @@ TEXT = {
         "recommendations": "Recommendations",
         "chart": "Pageviews over time",
         "followup": "Follow-up: {question}",
+        "seasonality": "Seasonality",
+        "col_year": "Year",
+        "col_season": "Season",
+        "col_season_mean": "Average\nper month",
+        "col_peak": "Peak (vs average)",
+        "col_low": "Low (vs average)",
+        "peak_repeats": "The highest month every year is {month}.",
+        "peak_varies": "The highest month differs by year: {months}.",
+        "low_repeats": "The lowest month every year is {month}.",
+        "low_varies": "The lowest month differs by year: {months}.",
+        "peak_is_trend": "The peak of season {season} is not above its neighbouring months, so it reflects the overall trend rather than seasonality.",
+        "season_note": "Each season (12 months) is compared with its own average. Green = season peak, red = season low.",
         "views_per_month": "views per month",
         "no_data": "No data",
         "missing_lang": "There is no {name} article, so there is no data (which is not the same as zero interest).",
@@ -104,6 +135,11 @@ def t(key: str, lang: str, **kwargs) -> str:
 
 def lang_name(code: str, lang: str) -> str:
     return LANG_NAMES[_l(lang)].get(code, code)
+
+
+def month_name(month: str, lang: str, full: bool = False) -> str:
+    """'11' -> 'листопад' (full) or 'лис'."""
+    return (MONTHS_FULL if full else MONTHS)[_l(lang)][int(month) - 1]
 
 
 def month_label(x: float, lang: str) -> str:

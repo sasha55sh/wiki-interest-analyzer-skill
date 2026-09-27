@@ -1,8 +1,8 @@
 """Short PDF report for the user, one per session.
 
 Layout: title (the user's main question) → results table → critical issues (only if any)
-→ conclusion → recommendations → chart → follow-ups (question, short answer, chart if the
-follow-up fetched new data). A short report fits one A4 page; long text flows onto further pages.
+→ conclusion → recommendations → chart → seasonality (≥ 24 months: month × year table and
+peaks per season) → follow-ups (question, short answer, chart if the follow-up fetched new data). A short report fits one A4 page; long text flows onto further pages.
 Numbers come from analysis-N.json; conclusion, recommendations and answers are written by the agent.
 """
 
@@ -29,7 +29,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-from .i18n import lang_name, period_label, t
+from .i18n import lang_name, month_name, period_label, t
 
 FONT = "DejaVuSans"
 FONT_BOLD = "DejaVuSans-Bold"
@@ -129,6 +129,83 @@ def _results_table(analysis: dict, lang: str) -> Table:
     return table
 
 
+def _grid_style(font_size: float) -> list:
+    return [
+        ("FONTNAME", (0, 0), (-1, -1), FONT),
+        ("FONTNAME", (0, 0), (-1, 0), FONT_BOLD),
+        ("FONTSIZE", (0, 0), (-1, -1), font_size),
+        ("BACKGROUND", (0, 0), (-1, 0), HEADER_BG),
+        ("LINEBELOW", (0, 0), (-1, 0), 0.8, ACCENT),
+        ("LINEBELOW", (0, 1), (-1, -1), 0.25, colors.lightgrey),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]
+
+
+def _seasonality_block(code: str, seas: dict, lang: str, body: ParagraphStyle) -> list:
+    """Month × year table, one row per season (peak / low vs its mean), and a one-line summary."""
+    peaks = {s["peak_month"] for s in seas["seasons"]}
+    lows = {s["low_month"] for s in seas["seasons"]}
+    years = sorted({y for per_year in seas["by_month"].values() for y in per_year})
+
+    grid = [[t("col_year", lang)] + [month_name(f"{m:02d}", lang) for m in range(1, 13)]]
+    style = _grid_style(7.5) + [("ALIGN", (1, 0), (-1, -1), "RIGHT")]
+    for r, year in enumerate(years, start=1):
+        row = [year]
+        for c, month in enumerate((f"{m:02d}" for m in range(1, 13)), start=1):
+            value = seas["by_month"].get(month, {}).get(year)
+            row.append(_int(value) if value is not None else "—")
+            key = f"{year}-{month}"
+            if key in peaks or key in lows:
+                style += [("TEXTCOLOR", (c, r), (c, r), GOOD if key in peaks else BAD),
+                          ("FONTNAME", (c, r), (c, r), FONT_BOLD)]
+        grid.append(row)
+    width = PAGE_W - 2 * MARGIN
+    month_table = Table(grid, colWidths=[1.4 * cm] + [(width - 1.4 * cm) / 12] * 12)
+    month_table.setStyle(TableStyle(style))
+
+    def point(month: str, views: int, pct: float | None) -> str:
+        return f"{month_name(month[5:], lang)} {month[:4]}: {_int(views)} ({_pct(pct, lang)})"
+
+    rows = [[t(k, lang) for k in ("col_season", "col_season_mean", "col_peak", "col_low")]]
+    for s in seas["seasons"]:
+        rows.append([
+            period_label(s["start"], s["end"], lang),
+            _int(s["mean"]),
+            point(s["peak_month"], s["peak_views"], s["peak_vs_mean_pct"]),
+            point(s["low_month"], s["low_views"], s["low_vs_mean_pct"]),
+        ])
+    season_table = Table(rows, colWidths=[4.2 * cm, 2.6 * cm, 5.5 * cm, 5.5 * cm])
+    season_table.setStyle(TableStyle(_grid_style(8.5) + [
+        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+        ("TEXTCOLOR", (2, 1), (2, -1), GOOD),
+        ("TEXTCOLOR", (3, 1), (3, -1), BAD),
+    ]))
+
+    def months(key: str) -> str:
+        distinct = dict.fromkeys(s[key][5:] for s in seas["seasons"])  # keeps first-seen order
+        return ", ".join(month_name(m, lang, full=True) for m in distinct)
+
+    lines = [
+        t("peak_repeats", lang, month=month_name(seas["peak_calendar_month"], lang, full=True))
+        if seas["peak_repeats"] else t("peak_varies", lang, months=months("peak_month")),
+        t("low_repeats", lang, month=month_name(seas["low_calendar_month"], lang, full=True))
+        if seas["low_repeats"] else t("low_varies", lang, months=months("low_month")),
+    ]
+    lines += [t("peak_is_trend", lang, season=period_label(s["start"], s["end"], lang))
+              for s in seas["seasons"] if s["peak_above_neighbours"] is False]
+
+    return [
+        Paragraph(f"<b>{escape(_cap(lang_name(code, lang)))}</b>. " + escape(" ".join(lines)), body),
+        Spacer(1, 0.1 * cm),
+        month_table,
+        Spacer(1, 0.15 * cm),
+        season_table,
+        Spacer(1, 0.2 * cm),
+    ]
+
+
 def generate_report(
     topic: str,
     analysis: dict,
@@ -206,6 +283,13 @@ def generate_report(
             Paragraph(t("chart", lang), h2),
             Image(chart_file, width=PAGE_W - 2 * MARGIN, height=7 * cm, kind="proportional"),
         ]))
+
+    seasonal = {code: d["seasonality"] for code, d in analysis.items() if d.get("seasonality")}
+    if seasonal:
+        blocks = [_seasonality_block(code, s, lang, body) for code, s in seasonal.items()]
+        story.append(KeepTogether([Paragraph(t("seasonality", lang), h2), *blocks[0]]))
+        story += [KeepTogether(b) for b in blocks[1:]]
+        story.append(Paragraph(t("season_note", lang), small))
 
     for f in followups or []:
         block = [Paragraph(escape(t("followup", lang, question=f["question"])), h2)]

@@ -3,12 +3,84 @@
 import json
 from datetime import date
 
+import pandas as pd
 from wiki_interest.analyze import (
     analyze,
     baseline,
     detect_anomalies,
     monthly_from_daily,
+    seasonality,
 )
+
+
+def _monthly(start_year: int, start_month: int, values: list[float]) -> pd.Series:
+    keys = []
+    y, m = start_year, start_month
+    for _ in values:
+        keys.append(f"{y}-{m:02d}")
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    return pd.Series(values, index=keys)
+
+
+def _season(nov: float = 250, jun: float = 50, other: float = 100) -> list[float]:
+    """Sep..Aug with a November peak and a June low."""
+    months = [9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8]
+    return [nov if m == 11 else jun if m == 6 else other for m in months]
+
+
+def test_seasonality_repeating_peak_vs_season_mean():
+    s = _monthly(2023, 9, _season() * 3)
+    r = seasonality(s)
+    assert len(r["seasons"]) == 3
+    assert r["peak_calendar_month"] == "11" and r["peak_repeats"]
+    assert r["low_calendar_month"] == "06" and r["low_repeats"]
+    first = r["seasons"][0]
+    assert (first["start"], first["end"]) == ("2023-09", "2024-08")
+    mean = (10 * 100 + 250 + 50) / 12
+    assert first["mean"] == round(mean, 1)
+    assert first["peak_month"] == "2023-11"
+    assert first["peak_vs_mean_pct"] == round((250 / mean - 1) * 100, 1)  # +130.8%
+    assert first["low_vs_mean_pct"] == round((50 / mean - 1) * 100, 1)  # -53.8%
+    assert first["peak_above_neighbours"] is True
+    assert first["months_above_mean"] == ["2023-11"]
+    assert r["by_month"]["11"] == {"2023": 250, "2024": 250, "2025": 250}
+
+
+def test_seasonality_each_season_uses_its_own_mean():
+    """Declining level: the peak is still measured against its own season."""
+    s = _monthly(2023, 9, _season() + [v / 2 for v in _season()] + [v / 4 for v in _season()])
+    pcts = {x["peak_vs_mean_pct"] for x in seasonality(s)["seasons"]}
+    assert len(pcts) == 1  # same shape, same relative peak, despite the lower level
+
+
+def test_seasonality_peak_moves_between_months():
+    oct_peak = [100, 250, 100, 100, 100, 100, 100, 100, 100, 50, 100, 100]
+    r = seasonality(_monthly(2023, 9, _season() + oct_peak))
+    assert not r["peak_repeats"]
+    assert [x["peak_month"] for x in r["seasons"]] == ["2023-11", "2024-10"]
+
+
+def test_seasonality_trend_peak_is_flagged():
+    """Steady decline, no seasonality: each season's "peak" is its first month, not a real high."""
+    s = _monthly(2023, 1, [1000 * 0.97**i for i in range(36)])
+    seasons = seasonality(s)["seasons"]
+    assert all(x["peak_month"].endswith("-01") for x in seasons)
+    assert seasons[0]["peak_above_neighbours"] is None  # first month of the data: can't tell
+    assert all(x["peak_above_neighbours"] is False for x in seasons[1:])
+
+
+def test_seasonality_needs_two_full_seasons():
+    assert seasonality(_monthly(2024, 1, [100] * 23)) is None
+    r = seasonality(_monthly(2023, 7, [100] * 30))  # 30 months -> last 24 = 2 seasons
+    assert [x["start"] for x in r["seasons"]] == ["2024-01", "2025-01"]
+
+
+def test_analyze_includes_seasonality():
+    daily = {date(2023 + (m - 1) // 12, (m - 1) % 12 + 1, 1): 100 * m for m in range(1, 25)}
+    result = analyze(daily)
+    assert result["seasonality"] is not None
+    json.dumps(result)
+    assert analyze({date(2025, 1, d): 10 for d in range(1, 29)})["seasonality"] is None
 
 
 def test_monthly_from_daily():

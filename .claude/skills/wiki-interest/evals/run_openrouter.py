@@ -74,7 +74,7 @@ Then explain what you found."""
                 missing = [e for e in eval_case["expect_in_response"] if e not in answer]
                 print(f"  [FAIL] Missing: {missing}")
 
-        except Exception as e:
+        except (httpx.HTTPError, ValueError, KeyError, IndexError) as e:  # network, bad JSON, bad shape
             print(f"  [ERROR] {e}")
 
     print(f"\n[RESULT] {passed}/{total} evals passed on {model}")

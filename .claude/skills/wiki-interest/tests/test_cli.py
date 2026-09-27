@@ -56,6 +56,34 @@ def test_report_pdf_cyrillic_and_long_text_flows(tmp_path):
     assert data.count(b"/Type /Page\n") + data.count(b"/Type /Page ") >= 2  # long text -> more pages
 
 
+def _pdf_text(path) -> str:
+    from pypdf import PdfReader
+
+    return " ".join(page.extract_text() for page in PdfReader(str(path)).pages)
+
+
+def test_report_shows_seasonality_only_with_two_years(tmp_path):
+    months = [9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8]
+    daily = {}
+    for i in range(36):
+        y, m = 2023 + (8 + i) // 12, months[i % 12]
+        for d in range(1, 29):
+            daily[date(y, m, d)] = 300 if m == 11 else 60 if m == 6 else 100
+    chart = tmp_path / "chart.png"
+    plot_trends({"uk": analyze(daily)}, output=str(chart), lang="uk")
+
+    pdf = tmp_path / "seasonal.pdf"
+    generate_report("Дієта", {"uk": analyze(daily)}, str(chart), output_file=str(pdf), lang="uk")
+    text = _pdf_text(pdf)
+    assert "Сезонність" in text
+    assert "Найвищий місяць щороку — листопад" in text
+    assert "Найнижчий місяць щороку — червень" in text
+
+    short = tmp_path / "short.pdf"
+    generate_report("Тест", _sample_results(), str(chart), output_file=str(short), lang="uk")
+    assert "Сезонність" not in _pdf_text(short)  # 12 months: no seasonal comparison
+
+
 def _make_session(home, n_steps: int):
     """Session folder as `run` writes it: session.json + analysis-N.json per step."""
     run_dir = home / "runs" / "session-1"

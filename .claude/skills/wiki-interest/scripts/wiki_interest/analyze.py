@@ -5,6 +5,7 @@ All statistics are computed per language independently.
 """
 
 import statistics
+from collections import Counter
 from dataclasses import dataclass
 from datetime import date
 
@@ -135,6 +136,65 @@ def detect_anomalies(daily: dict[date, int]) -> list[Anomaly]:
     return anomalies[:10]
 
 
+def _pct_vs(value: float, mean: float) -> float | None:
+    return round((value / mean - 1) * 100, 1) if mean > 0 else None
+
+
+def seasonality(series: pd.Series) -> dict | None:
+    """Seasonal pattern of a monthly series, or None with fewer than 24 months.
+
+    Seasons are complete 12-month windows counted back from the last month, so the last
+    season is always the last 12 months; an incomplete leading remainder is dropped.
+    Each season is compared with its own mean, so a long-term trend does not hide the pattern.
+    `peak_above_neighbours` is False when the peak is not higher than the adjacent months
+    (e.g. the first month of a season in a falling series): then the "peak" is just the trend.
+    """
+    n_seasons = len(series) // 12
+    if n_seasons < 2:
+        return None
+    s = series.iloc[len(series) - n_seasons * 12:]
+
+    by_month: dict[str, dict[str, int]] = {}
+    for key, v in s.items():
+        year, month = key.split("-")
+        by_month.setdefault(month, {})[year] = int(v)
+
+    seasons = []
+    for i in range(n_seasons):
+        w = s.iloc[i * 12:(i + 1) * 12]
+        mean = float(w.mean())
+        peak, low = w.idxmax(), w.idxmin()
+        pos = series.index.get_loc(peak)
+        if 0 < pos < len(series) - 1:
+            above = bool(series.iloc[pos] > series.iloc[pos - 1] and series.iloc[pos] > series.iloc[pos + 1])
+        else:
+            above = None 
+        seasons.append({
+            "start": w.index[0],
+            "end": w.index[-1],
+            "mean": round(mean, 1),
+            "peak_month": peak,
+            "peak_views": int(w[peak]),
+            "peak_vs_mean_pct": _pct_vs(float(w[peak]), mean),
+            "peak_above_neighbours": above,
+            "low_month": low,
+            "low_views": int(w[low]),
+            "low_vs_mean_pct": _pct_vs(float(w[low]), mean),
+            "months_above_mean": [k for k, v in w.items() if v > mean],
+        })
+
+    peak_months = Counter(x["peak_month"][5:] for x in seasons)
+    low_months = Counter(x["low_month"][5:] for x in seasons)
+    return {
+        "by_month": dict(sorted(by_month.items())),
+        "seasons": seasons,
+        "peak_calendar_month": peak_months.most_common(1)[0][0],
+        "peak_repeats": len(peak_months) == 1,
+        "low_calendar_month": low_months.most_common(1)[0][0],
+        "low_repeats": len(low_months) == 1,
+    }
+
+
 def baseline(daily: dict[date, int]) -> dict:
     """YoY and trend of the whole language edition, to tell topic interest from site-wide drift."""
     if not daily:
@@ -162,7 +222,6 @@ def analyze(daily: dict[date, int]) -> dict:
         caveats.append("high_seasonality")
     if min(daily.keys()) < date(2020, 4, 1):
         caveats.append("bot_traffic_before_2020")
-    # One point each: enough volume, enough history, significant trend whose CI excludes 0.
     score = 0
     if med >= 1000:
         score += 1
@@ -195,5 +254,6 @@ def analyze(daily: dict[date, int]) -> dict:
         ],
         "confidence": confidence,
         "caveats": caveats,
+        "seasonality": seasonality(series),
         "monthly": {month: int(v) for month, v in series.items()},
     }
