@@ -14,6 +14,8 @@ import pandas as pd
 import pymannkendall as mk
 from scipy import stats
 
+MIN_SPIKE_VIEWS = 20  # a daily spike must add at least this many views over the median
+
 
 @dataclass
 class Anomaly:
@@ -36,14 +38,21 @@ def month_key(d: date) -> str:
     return d.strftime("%Y-%m")
 
 
-def monthly_from_daily(daily: dict[date, int]) -> pd.Series:
-    """Aggregate daily pageviews into months. Returns a Series indexed by month (YYYY-MM)."""
-    if not daily:
+def monthly_from_daily(daily: dict[date, int], start: date | None = None, end: date | None = None) -> pd.Series:
+    """Aggregate daily pageviews into months. Returns a Series indexed by month (YYYY-MM).
+
+    With `start`/`end` the series covers every month of that period (months without views
+    are 0); otherwise it runs from the first to the last day in `daily`.
+    """
+    if not daily and not (start and end):
         return pd.Series(dtype=int)
     days = pd.to_datetime(list(daily.keys()))
     views = list(daily.values())
-    df = pd.DataFrame({"views": views}, index=days).sort_index()
+    df = pd.DataFrame({"views": views}, index=days, dtype="int64").sort_index()
     monthly = df.resample("MS").sum()["views"]
+    if start and end:
+        months = pd.date_range(pd.Timestamp(start.replace(day=1)), pd.Timestamp(end.replace(day=1)), freq="MS")
+        monthly = monthly.reindex(months, fill_value=0)
     return monthly.rename(lambda d: d.strftime("%Y-%m"))
 
 
@@ -66,15 +75,16 @@ def _trend_and_ci(
 ) -> tuple[float | None, float | None, float | None]:
     """OLS slope on log(views) per month, 95% CI via moving-block bootstrap of residuals.
 
-    Residual blocks keep the autocorrelation (and seasonality) of the series, so the
-    CI is wider than a naive i.i.d. bootstrap would give.
+    Months with 0 views are skipped (log 0), but the others keep their real month positions,
+    so a gap does not compress time. Residual blocks keep the autocorrelation (and
+    seasonality) of the series, so the CI is wider than a naive i.i.d. bootstrap would give.
     """
-    positive = s[s > 0]
-    n = len(positive)
+    values = s.values.astype(float)
+    x = np.flatnonzero(values > 0)
+    n = len(x)
     if n < 3:
         return None, None, None
-    x = np.arange(n)
-    y = np.log(positive.values.astype(float))
+    y = np.log(values[x])
     fit = stats.linregress(x, y)
     fitted = fit.intercept + fit.slope * x
     resid = y - fitted
@@ -118,22 +128,26 @@ def trend_metrics(s: pd.Series) -> TrendMetrics:
 
 
 def detect_anomalies(daily: dict[date, int]) -> list[Anomaly]:
-    """Daily spikes: rolling median ± MAD, threshold z > 5 or factor > 3."""
+    """Daily spikes, the 10 largest (by factor over the rolling median) first.
+
+    A spike is > 3x the 31-day rolling median or a robust z-score (rolling MAD) > 5, and at
+    least MIN_SPIKE_VIEWS above the median: on a low-volume article 2 views vs a median of 1
+    is noise, not news. Days missing from `daily` count as 0 views.
+    """
     if len(daily) < 30:
         return []
     s = pd.Series(daily).sort_index()
+    s.index = pd.to_datetime(s.index)
+    s = s.asfreq("D", fill_value=0)
     rolling_med = s.rolling(window=31, center=True, min_periods=15).median()
-    diff = (s - rolling_med).abs()
-    mad = diff.rolling(window=31, center=True, min_periods=15).median() * 1.4826
-    with np.errstate(divide="ignore", invalid="ignore"):
-        z_score = np.abs(s - rolling_med) / (mad + 1e-9)
-    outliers = (z_score > 5) | ((rolling_med > 0) & (s > rolling_med * 3))
-    anomalies = []
-    for d in s[outliers].index:
-        if d in daily and rolling_med[d] > 0:
-            factor = daily[d] / rolling_med[d]
-            anomalies.append(Anomaly(month_key(d), factor, daily[d]))
-    return anomalies[:10]
+    excess = s - rolling_med
+    mad = excess.abs().rolling(window=31, center=True, min_periods=15).median() * 1.4826
+    z_score = excess / mad.clip(lower=1.0)  # MAD is 0 on flat series; don't divide by ~0
+    outliers = ((z_score > 5) | (s > rolling_med * 3)) & (excess >= MIN_SPIKE_VIEWS) & (rolling_med > 0)
+    anomalies = [
+        Anomaly(month_key(d), float(s[d] / rolling_med[d]), int(s[d])) for d in s[outliers].index
+    ]
+    return sorted(anomalies, key=lambda a: a.factor, reverse=True)[:10]
 
 
 def _pct_vs(value: float, mean: float) -> float | None:
@@ -195,11 +209,11 @@ def seasonality(series: pd.Series) -> dict | None:
     }
 
 
-def baseline(daily: dict[date, int]) -> dict:
+def baseline(daily: dict[date, int], start: date | None = None, end: date | None = None) -> dict:
     """YoY and trend of the whole language edition, to tell topic interest from site-wide drift."""
     if not daily:
         return {"yoy_change_pct": None, "trend_pct_per_year": None}
-    series = monthly_from_daily(daily)
+    series = monthly_from_daily(daily, start, end)
     m = trend_metrics(series)
     return {
         "yoy_change_pct": round(m.yoy_change_pct, 1) if m.yoy_change_pct is not None else None,
@@ -207,9 +221,13 @@ def baseline(daily: dict[date, int]) -> dict:
     }
 
 
-def analyze(daily: dict[date, int]) -> dict:
-    """Analyze pageviews for one language. Returns dict suitable for JSON output."""
-    series = monthly_from_daily(daily)
+def analyze(daily: dict[date, int], start: date | None = None, end: date | None = None) -> dict:
+    """Analyze pageviews for one language. Returns dict suitable for JSON output.
+
+    `start`/`end`: the analysed period (complete months); months in it without views count
+    as 0. The caller moves `start` past the article's creation so no partial month is included.
+    """
+    series = monthly_from_daily(daily, start, end)
     yoy = trend_metrics(series)
     anomalies = detect_anomalies(daily)
     caveats = []
@@ -220,7 +238,7 @@ def analyze(daily: dict[date, int]) -> dict:
         caveats.append("low_volume")
     if series.size > 1 and series.std() / (series.mean() + 1e-9) > 0.5:
         caveats.append("high_seasonality")
-    if min(daily.keys()) < date(2020, 4, 1):
+    if (start or min(daily.keys())) < date(2020, 4, 1):
         caveats.append("bot_traffic_before_2020")
     score = 0
     if med >= 1000:

@@ -10,7 +10,7 @@ Facts about the API that this module relies on:
 
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime
+from datetime import UTC, date, datetime, timedelta
 from urllib.parse import quote
 
 import httpx
@@ -23,8 +23,8 @@ USER_AGENT = (
     "(https://github.com/sasha55sh/wiki-interest-analyzer-skill; Agent Skill for pageview analysis)"
 )
 PAGEVIEWS = "https://wikimedia.org/api/rest_v1/metrics/pageviews"
-DATA_START = date(2015, 7, 1)
 TOTAL = "__project_total__"
+SETTLE_DAYS = 3  # the API publishes a day's views with a delay of up to a couple of days
 
 
 class ApiError(RuntimeError):
@@ -78,14 +78,25 @@ def _download(client: Client, project: str, title: str, start: date, end: date) 
     return _parse_items(client.get_json(url))
 
 
+def settled_day(today: date | None = None) -> date:
+    """Last day whose pageviews are final; later days may still be missing from the API."""
+    return (today or datetime.now(UTC).date()) - timedelta(days=SETTLE_DAYS)
+
+
 def daily_views(
-    client: Client, cache: Cache, targets: list[tuple[str, str]], start: date, end: date, workers: int = 6
+    client: Client, cache: Cache, targets: list[tuple[str, str]], start: date, end: date, workers: int = 6,
+    today: date | None = None,
 ) -> dict[tuple[str, str], dict[date, int]]:
-    """Daily views for each (project, title), downloading only uncached days."""
+    """Daily views for each (project, title), downloading only uncached days.
+
+    Days after `settled_day()` are not marked as cached, so they are fetched again next time
+    instead of being kept as zeros forever.
+    """
+    settled = settled_day(today)
     jobs = [(p, t, s, e) for p, t in targets for s, e in cache.missing_ranges(p, t, start, end)]
     if jobs:
         with ThreadPoolExecutor(max_workers=workers) as pool:
             results = list(pool.map(lambda j: _download(client, *j), jobs))
         for (p, t, s, e), views in zip(jobs, results, strict=True):
-            cache.store(p, t, s, e, views)
+            cache.store(p, t, s, min(e, settled), views)
     return {(p, t): cache.daily(p, t, start, end) for p, t in targets}

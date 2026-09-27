@@ -11,14 +11,15 @@ each follow-up that needs new data adds a step (analysis-N.json, chart-N.png).
 
 import argparse
 import json
+import secrets
 import sys
 import time
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, timedelta
 from pathlib import Path
 
 from .analyze import analyze, baseline
 from .cache import Cache, home
-from .fetch import TOTAL, Client, daily_views
+from .fetch import TOTAL, Client, daily_views, settled_day
 from .plot import plot_trends
 from .resolve import TopicError, resolve
 
@@ -50,13 +51,31 @@ def _session_not_found(session_id: str) -> dict:
 
 
 def _period(months: int, today: date | None = None) -> tuple[date, date]:
-    """Last `months` complete calendar months: first day of the first month .. last day of the last."""
-    today = today or datetime.now(UTC).date()  # Wikimedia days are UTC
-    end = today.replace(day=1) - timedelta(days=1)
+    """Last `months` complete calendar months: first day of the first month .. last day of the last.
+
+    A month counts as complete once all its days are published (`settled_day`), so in the
+    first days of a month the period still ends a month earlier.
+    """
+    end = settled_day(today).replace(day=1) - timedelta(days=1)  # Wikimedia days are UTC
     y, m = end.year, end.month - (months - 1)
     while m < 1:
         y, m = y - 1, m + 12
     return date(y, m, 1), end
+
+
+def _data_start(articles: list, start: date) -> date:
+    """First day of the first complete month since the oldest of `articles` was created.
+
+    An article created inside the period has a partial first month that would look like
+    growth, so its data starts with the next full month. Unknown creation date → `start`.
+    """
+    created = [a.created for a in articles]
+    if not created or None in created or min(created) <= start:
+        return start
+    first = min(created)
+    if first.day == 1:
+        return first
+    return (first.replace(day=28) + timedelta(days=4)).replace(day=1)
 
 
 def _topic_error(e: TopicError) -> dict:
@@ -108,22 +127,27 @@ def cmd_run(args):
     results = {}
     for lang in args.langs:
         project = f"{lang}.wikipedia"
+        articles = resolution.articles.get(lang, [])
+        lang_start = _data_start(articles, start)
         lang_views: dict[date, int] = {}
-        for (proj, title), views in views_data.items():
-            if proj != project or title == TOTAL:
-                continue
-            for d, v in views.items():
-                lang_views[d] = lang_views.get(d, 0) + v  # article + its redirects
+        for article in articles:
+            for title in [article.title, *article.redirects[:MAX_REDIRECTS]]:
+                for d, v in views_data.get((project, title), {}).items():
+                    if d >= lang_start:
+                        lang_views[d] = lang_views.get(d, 0) + v  # article + its redirects
 
-        if lang_views and any(lang_views.values()):
-            analysis = analyze(lang_views)
-            analysis["baseline"] = baseline(views_data.get((project, TOTAL), {}))
+        if lang_start <= end and any(lang_views.values()):
+            analysis = analyze(lang_views, lang_start, end)
+            analysis["baseline"] = baseline(views_data.get((project, TOTAL), {}), lang_start, end)
             results[lang] = analysis
 
     topic_label = args.topic or ", ".join(i["label"] for i in resolution.items)
-    langs_missing = [lang for lang in args.langs if lang not in results]
+    # No article ≠ an article without views in the period (e.g. created after it).
+    langs_missing = [lang for lang in args.langs if not resolution.articles.get(lang)]
+    langs_no_views = [lang for lang in args.langs if lang not in results and lang not in langs_missing]
 
-    session_id = args.session or f"session-{int(time.time())}"
+    # The random suffix keeps two sessions started in the same second apart.
+    session_id = args.session or f"session-{int(time.time())}-{secrets.token_hex(3)}"
     run_dir = _session_dir(session_id)
     run_dir.mkdir(parents=True, exist_ok=True)
     step = len(session["steps"]) + 1
@@ -142,12 +166,14 @@ def cmd_run(args):
         "period": [start.isoformat(), end.isoformat()],
         "articles": {
             lang: [
-                {"title": a.title, "redirects_counted": len(a.redirects[:MAX_REDIRECTS])}
+                {"title": a.title, "redirects_counted": len(a.redirects[:MAX_REDIRECTS]),
+                 "created": a.created.isoformat() if a.created else None}
                 for a in arts
             ]
             for lang, arts in resolution.articles.items()
         },
         "langs_missing": langs_missing,
+        "langs_no_views": langs_no_views,
     })
     _save_session(session_id, session)
 
@@ -158,9 +184,11 @@ def cmd_run(args):
         "period": [start.isoformat(), end.isoformat()],
         "langs_found": list(results.keys()),
         "langs_missing": langs_missing,
+        "langs_no_views": langs_no_views,
         "results": {
             lang: {k: v for k, v in r.items() if k not in ("monthly", "anomalies")}
-            | {"anomaly_months": sorted({a["month"] for a in r["anomalies"]})}
+            | {"first_month": next(iter(r["monthly"]), None),
+               "anomaly_months": sorted({a["month"] for a in r["anomalies"]})}
             for lang, r in results.items()
         },
         "files": {"analysis": str(analysis_file), "chart": str(plot_file)},
@@ -193,7 +221,10 @@ def cmd_resolve(args):
     return {
         "qids": [{"qid": item["qid"], "label": item["label"]} for item in resolution.items],
         "articles": {
-            lang: [{"title": a.title, "redirects": a.redirects} for a in articles]
+            lang: [
+                {"title": a.title, "redirects": a.redirects, "created": a.created.isoformat() if a.created else None}
+                for a in articles
+            ]
             for lang, articles in resolution.articles.items()
         },
         "missing": resolution.missing,
@@ -225,9 +256,17 @@ def cmd_report(args):
     def question(step: dict) -> str:
         return step.get("question") or step["topic"]
 
+    def data_followup(step: dict, answer: str) -> dict:
+        analysis, chart = load(step)
+        return {
+            "question": question(step), "answer": answer, "chart_file": str(chart), "analysis": analysis,
+            "langs_missing": step.get("langs_missing") or [], "langs_no_views": step.get("langs_no_views") or [],
+        }
+
     followups, used = [], set()
     for first, answer in args.followup or []:
-        if first.strip().isdigit():
+        # A step number is short; a 4-digit number like "2025" is a question (e.g. a year).
+        if first.strip().isdigit() and len(first.strip()) < 4:
             n = int(first)
             if not 2 <= n <= len(steps):
                 return {
@@ -236,15 +275,13 @@ def cmd_report(args):
                             "(step 1 is the main question). For a text-only follow-up pass "
                             '--followup "<question>" "<answer>".',
                 }
-            _, chart = load(steps[n - 1])
             used.add(n)
-            followups.append({"question": question(steps[n - 1]), "answer": answer, "chart_file": str(chart)})
+            followups.append(data_followup(steps[n - 1], answer))
         else:
             followups.append({"question": first, "answer": answer, "chart_file": None})
     for step in steps[1:]:
         if step["step"] not in used:
-            _, chart = load(step)
-            followups.append({"question": question(step), "answer": "", "chart_file": str(chart)})
+            followups.append(data_followup(step, ""))
 
     main = steps[0]
     analysis, chart = load(main)
@@ -330,7 +367,7 @@ def main(argv: list[str] | None = None) -> int:
         args.qids = [q.strip() for q in args.qids.split(",") if q.strip()]
     else:
         args.qids = None
-    if (getattr(args, "months", None) or 1) < 1:
+    if getattr(args, "months", None) is not None and args.months < 1:
         parser.error("--months must be >= 1")
     has_session = bool(getattr(args, "session", None)) and args.command == "run"
     if args.command in ("run", "resolve") and not args.topic and not args.qids and not has_session:
@@ -341,7 +378,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result = args.func(args)
     except Exception as e:  # noqa: BLE001 - surface any failure as JSON for the agent
-        print(json.dumps({"error": "internal_error", "message": str(e)}, ensure_ascii=False))
+        print(json.dumps({
+            "error": "internal_error",
+            "message": f"{type(e).__name__}: {e}",
+            "hint": "Retry once (network errors are often temporary); if it fails again, tell the "
+                    "user the analysis could not be run and show this message. Don't make up numbers.",
+        }, ensure_ascii=False))
         return 1
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 1 if "error" in result else 0

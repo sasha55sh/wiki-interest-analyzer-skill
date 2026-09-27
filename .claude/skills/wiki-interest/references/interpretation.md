@@ -49,6 +49,8 @@ Compute topic − baseline for `yoy_change_pct` (or `trend_pct_per_year`):
 | `high_seasonality` | "Views swing a lot from month to month (e.g. school year, holidays), so the trend is less certain." |
 | `bot_traffic_before_2020` | "Early data may include some undetected bot traffic." |
 | language in `langs_missing` | "There is no article in that language, so there is no data, which is not the same as zero interest." |
+| language in `langs_no_views` | "There is an article in that language, but it had no views in this period (or is too new for a full month)." |
+| `first_month` later than the period start | "The article only appeared in <month>, so the numbers cover a shorter period." |
 | `anomaly_months` | "Spikes in <months>, likely news or media coverage; they can inflate a single year." |
 
 ## Business framing

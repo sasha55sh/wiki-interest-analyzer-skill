@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from wiki_interest.cache import Cache
-from wiki_interest.fetch import Client
+from wiki_interest.fetch import ApiError, Client
 from wiki_interest.resolve import TopicError, pick, search
 
 
@@ -22,6 +22,19 @@ def test_search_returns_candidates():
     cache.put_lookup.return_value = None
     candidates = search(client, cache, "Astronomy", ["uk"])
     assert isinstance(candidates, list)
+
+
+def test_api_error_is_not_cached(tmp_path):
+    """MediaWiki errors come with HTTP 200; they must not be cached as "nothing found"."""
+    client = MagicMock(spec=Client)
+    client.get_json.return_value = {"error": {"code": "maxlag", "info": "Waiting for a database server"}}
+    cache = Cache(tmp_path / "c.db")
+    try:
+        with pytest.raises(ApiError, match="maxlag"):
+            search(client, cache, "Astronomy", ["uk"])
+        assert cache.db.execute("SELECT COUNT(*) FROM lookups").fetchone()[0] == 0
+    finally:
+        cache.db.close()
 
 
 def test_pick_ambiguous_topic():

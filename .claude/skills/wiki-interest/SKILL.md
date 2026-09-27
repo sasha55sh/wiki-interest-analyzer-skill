@@ -61,8 +61,9 @@ Every command prints one JSON object; on failure it has `"error"` and a `"hint"`
    ```
    `--followup <step> "<answer>"` = a follow-up that ran a new step (question and chart
    come from the session); `--followup "<question>" "<answer>"` = one answered without new
-   data. Keep the order in which they were asked. Tables, the chart, the seasonality section
-   and data problems (missing languages, low volume, short history) are added automatically;
+   data. Keep the order in which they were asked. Tables, charts, the seasonality section
+   and data problems (missing languages, low volume, short history) are added automatically,
+   for follow-up steps too;
    add other issues with `--problem "..."`. Give the user the path from `files.report`.
 
 ## Result fields (per language, in `results`)
@@ -73,6 +74,8 @@ Every command prints one JSON object; on failure it has `"error"` and a `"hint"`
 - `confidence`: `high` | `medium` | `low`; `caveats`: `short_history`, `low_volume`,
   `high_seasonality`, `bot_traffic_before_2020`.
 - `baseline`: the same YoY/trend for the **whole** Wikipedia in that language.
+- `first_month`: first month of data. Later than the period start when the article was
+  created during the period (its partial first month is skipped).
 - `anomaly_months`: months with one-day spikes (news, TV, viral links).
 - `seasonality` (`null` with < 24 months):
   - `by_month`: month × year table, e.g. `{"11": {"2023": 2088, "2024": 973}}`;
@@ -81,6 +84,8 @@ Every command prints one JSON object; on failure it has `"error"` and a `"hint"`
     `months_above_mean`, `peak_above_neighbours` (`false` = the "peak" is just the trend);
   - `peak_calendar_month` + `peak_repeats` (same peak month every season?); same for `low_`.
 - `langs_missing` (top level): no article in that language.
+- `langs_no_views` (top level): the article exists, but it has no views in the period (or
+  was created too recently for a complete month). Say exactly that, not "no article".
 
 ## Rules for the answer
 

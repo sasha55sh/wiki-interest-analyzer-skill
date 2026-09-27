@@ -62,17 +62,25 @@ class Cache:
         return ranges
 
     def store(self, project: str, title: str, start: date, end: date, views: dict[date, int]) -> None:
-        """Store daily views for [start, end]; days absent from `views` are zero."""
+        """Store daily views and mark [start, end] as fetched; days absent from `views` are zero.
+
+        Coverage is one contiguous range per title: a range that does not touch the cached one
+        replaces it (otherwise the gap between them would count as fetched). With end < start
+        the views are stored but no days are marked as fetched.
+        """
         self.db.executemany(
             "INSERT OR REPLACE INTO pageviews VALUES (?, ?, ?, ?)",
             [(project, title, d.isoformat(), v) for d, v in views.items()],
         )
-        cov = self.coverage(project, title)
-        new_start, new_end = (min(start, cov[0]), max(end, cov[1])) if cov else (start, end)
-        self.db.execute(
-            "INSERT OR REPLACE INTO coverage VALUES (?, ?, ?, ?)",
-            (project, title, new_start.isoformat(), new_end.isoformat()),
-        )
+        if start <= end:
+            cov = self.coverage(project, title)
+            day = timedelta(days=1)
+            if cov and start <= cov[1] + day and end >= cov[0] - day:
+                start, end = min(start, cov[0]), max(end, cov[1])
+            self.db.execute(
+                "INSERT OR REPLACE INTO coverage VALUES (?, ?, ?, ?)",
+                (project, title, start.isoformat(), end.isoformat()),
+            )
         self.db.commit()
 
     def daily(self, project: str, title: str, start: date, end: date) -> dict[date, int]:

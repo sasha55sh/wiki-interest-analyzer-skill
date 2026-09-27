@@ -1,9 +1,10 @@
 """Topic text or QIDs -> Wikipedia article titles (plus redirects) per language."""
 
 from dataclasses import dataclass, field
+from datetime import date
 
 from .cache import Cache
-from .fetch import Client
+from .fetch import ApiError, Client
 
 WIKIDATA = "https://www.wikidata.org/w/api.php"
 AMBIGUITY_RATIO = 0.3
@@ -23,6 +24,7 @@ class Article:
     lang: str
     title: str
     redirects: list[str] = field(default_factory=list)
+    created: date | None = None  # first revision (UTC); None if the lookup failed
 
     @property
     def project(self) -> str:
@@ -36,10 +38,15 @@ class Resolution:
     missing: dict[str, list[str]] 
 
 def _cached(client: Client, cache: Cache, url: str, params: dict) -> dict:
+    """GET JSON through the lookup cache. MediaWiki reports errors with HTTP 200 and an
+    "error" key: those raise instead of being cached for 30 days as "nothing found"."""
     key = url + "?" + "&".join(f"{k}={params[k]}" for k in sorted(params))
     value = cache.get_lookup(key)
     if value is None:
         value = client.get_json(url, params) or {}
+        if "error" in value:
+            error = value["error"]
+            raise ApiError(f"{url}: {error.get('code')}: {error.get('info')}" if isinstance(error, dict) else str(error))
         cache.put_lookup(key, value)
     return value
 
@@ -67,7 +74,8 @@ def _label(entity: dict, langs: list[str], kind: str = "labels") -> str:
 
 
 def search(client: Client, cache: Cache, topic: str, langs: list[str]) -> list[dict]:
-    """Candidate entities for a topic, best first, each with its Wikipedia sitelink count."""
+    """Candidate entities for a topic in Wikidata's search order (English hits first), each with
+    its Wikipedia sitelink count. Not re-ranked by sitelinks: the first one is the best text match."""
     ids: list[str] = []
     for lang in dict.fromkeys(["en", *langs]):
         data = _cached(
@@ -127,6 +135,18 @@ def _redirects(client: Client, cache: Cache, lang: str, titles: list[str]) -> di
     return out
 
 
+def _created(client: Client, cache: Cache, lang: str, title: str) -> date | None:
+    """Date of the article's first revision (page moves keep the history, so this is its creation)."""
+    data = _cached(
+        client, cache, f"https://{lang}.wikipedia.org/w/api.php",
+        {"action": "query", "prop": "revisions", "titles": title, "rvlimit": 1, "rvdir": "newer",
+         "rvprop": "timestamp", "format": "json", "formatversion": 2},
+    )
+    pages = data.get("query", {}).get("pages", [])
+    revisions = pages[0].get("revisions") if pages else None
+    return date.fromisoformat(revisions[0]["timestamp"][:10]) if revisions else None
+
+
 def resolve(
     client: Client, cache: Cache, langs: list[str], topic: str | None = None, qids: list[str] | None = None
 ) -> Resolution:
@@ -150,4 +170,5 @@ def resolve(
             redirects = _redirects(client, cache, lang, [a.title for a in arts])
             for a in arts:
                 a.redirects = redirects.get(a.title, [])
+                a.created = _created(client, cache, lang, a.title)
     return Resolution(items, articles, missing)

@@ -2,7 +2,9 @@
 
 Layout: title (the user's main question) → results table → critical issues (only if any)
 → conclusion → recommendations → chart → seasonality (≥ 24 months: month × year table and
-peaks per season) → follow-ups (question, short answer, chart if the follow-up fetched new data). A short report fits one A4 page; long text flows onto further pages.
+peaks per season) → follow-ups (question, short answer; for a follow-up that fetched new data
+also its results table, data problems and chart). A short report fits one A4 page; long text
+flows onto further pages.
 Numbers come from analysis-N.json; conclusion, recommendations and answers are written by the agent.
 """
 
@@ -79,9 +81,14 @@ def _median(data: dict) -> float:
     return statistics.median(values) if values else 0
 
 
-def auto_problems(analysis: dict, missing: list[str], lang: str) -> list[str]:
-    """Data problems the user must know about, derived from the analysis."""
+def auto_problems(analysis: dict, missing: list[str], lang: str, no_views: list[str] | None = None) -> list[str]:
+    """Data problems the user must know about, derived from the analysis.
+
+    missing: languages without an article; no_views: languages with an article but no
+    views (or no complete month since its creation) in the period.
+    """
     out = [t("missing_lang", lang, name=lang_name(code, lang)) for code in missing]
+    out += [t("no_views_lang", lang, name=lang_name(code, lang)) for code in no_views or []]
     for code, d in analysis.items():
         name = _cap(lang_name(code, lang))
         for caveat in d.get("caveats") or []:
@@ -127,6 +134,17 @@ def _results_table(analysis: dict, lang: str) -> Table:
         *style,
     ]))
     return table
+
+
+def _issues_box(issues: list[str], body: ParagraphStyle) -> Table:
+    box = Table([[Paragraph("• " + escape(i), body)] for i in issues], colWidths=[PAGE_W - 2 * MARGIN])
+    box.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), WARN_BG),
+        ("LINEBEFORE", (0, 0), (0, -1), 2.5, colors.HexColor("#e65100")),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+    ]))
+    return box
 
 
 def _grid_style(font_size: float) -> list:
@@ -255,19 +273,11 @@ def generate_report(
     if analysis:
         story += [Paragraph(t("results", lang), h2), _results_table(analysis, lang)]
 
-    issues = auto_problems(analysis, meta.get("langs_missing") or [], lang) + list(problems or [])
+    issues = auto_problems(
+        analysis, meta.get("langs_missing") or [], lang, meta.get("langs_no_views") or []
+    ) + list(problems or [])
     if issues:
-        box = Table(
-            [[Paragraph("• " + escape(i), body)] for i in issues],
-            colWidths=[PAGE_W - 2 * MARGIN],
-        )
-        box.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, -1), WARN_BG),
-            ("LINEBEFORE", (0, 0), (0, -1), 2.5, colors.HexColor("#e65100")),
-            ("TOPPADDING", (0, 0), (-1, -1), 2),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
-        ]))
-        story += [Paragraph(t("problems", lang), h2), box]
+        story += [Paragraph(t("problems", lang), h2), _issues_box(issues, body)]
 
     if conclusion:
         story += [Paragraph(t("conclusion", lang), h2),
@@ -295,6 +305,13 @@ def generate_report(
         block = [Paragraph(escape(t("followup", lang, question=f["question"])), h2)]
         if f.get("answer"):
             block.append(Paragraph(escape(f["answer"]).replace("\n", "<br/>"), body))
+        if f.get("analysis"):
+            block += [Spacer(1, 0.15 * cm), _results_table(f["analysis"], lang)]
+        step_issues = auto_problems(
+            f.get("analysis") or {}, f.get("langs_missing") or [], lang, f.get("langs_no_views") or []
+        )
+        if step_issues:
+            block += [Spacer(1, 0.15 * cm), _issues_box(step_issues, body)]
         if f.get("chart_file") and Path(f["chart_file"]).exists():
             block.append(Image(f["chart_file"], width=PAGE_W - 2 * MARGIN, height=6 * cm, kind="proportional"))
         story.append(KeepTogether(block))

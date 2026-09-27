@@ -1,10 +1,12 @@
 """Test analyze: metrics, confidence, caveats."""
 
 import json
-from datetime import date
+from datetime import date, timedelta
 
+import numpy as np
 import pandas as pd
 from wiki_interest.analyze import (
+    _trend_and_ci,
     analyze,
     baseline,
     detect_anomalies,
@@ -131,6 +133,40 @@ def test_anomaly_detection():
     daily[date(2025, 1, 15)] = 400 
     anomalies = detect_anomalies(daily)
     assert any(a.month == "2025-01" for a in anomalies)
+
+
+def test_low_volume_noise_is_not_an_anomaly():
+    """1-2 views a day (MAD = 0): a day with 2 views is not a news spike."""
+    start = date(2024, 9, 1)
+    daily = {start + timedelta(days=i): 2 if i % 9 == 0 else 1 for i in range(730)}
+    assert detect_anomalies(daily) == []
+
+
+def test_largest_anomalies_are_kept():
+    """Many small spikes early on must not push out a huge late one."""
+    start = date(2024, 9, 1)
+    daily = {start + timedelta(days=i): 1000 for i in range(730)}
+    for i in range(12):
+        daily[start + timedelta(days=40 + i * 20)] = 3500
+    daily[start + timedelta(days=700)] = 100_000
+    anomalies = detect_anomalies(daily)
+    assert len(anomalies) == 10
+    assert anomalies[0].month == "2026-08" and anomalies[0].factor == 100
+
+
+def test_analyze_period_fills_months_without_views():
+    """With start/end every month of the period is in the series, empty ones as 0."""
+    daily = {date(2025, 1, 5): 10, date(2025, 3, 5): 30}
+    result = analyze(daily, date(2025, 1, 1), date(2025, 4, 30))
+    assert result["monthly"] == {"2025-01": 10, "2025-02": 0, "2025-03": 30, "2025-04": 0}
+
+
+def test_trend_keeps_month_positions_across_zero_months():
+    """100 -> 200 over 11 months with zeros between: slope = ln 2 / 11, not ln 2 / 1."""
+    s = pd.Series([100] + [0] * 10 + [200, 200])
+    slope = _trend_and_ci(s)[0]
+    assert abs(slope - np.polyfit([0, 11, 12], np.log([100, 200, 200]), 1)[0]) < 1e-9
+    assert slope < 0.1
 
 
 def test_analyze_returns_json_compatible():
